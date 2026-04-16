@@ -159,7 +159,7 @@ Reglas:
 - Respondé SOLO el JSON, sin explicaciones ni texto adicional"""
 
     response = anthropic_client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-5",
         max_tokens=500,
         system=system_prompt,
         messages=[{"role": "user", "content": mensaje}]
