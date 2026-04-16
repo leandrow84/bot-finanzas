@@ -33,11 +33,13 @@ def get_local_from_number(phone_number):
         ss = get_spreadsheet()
         config = ss.worksheet("CONFIG")
         data = config.get_all_records()
-        print(f"NUMERO RECIBIDO: '{phone_number}'")
-        print(f"NUMEROS EN CONFIG: {[str(row['NUMERO']).strip() for row in data]}")
-        for row in data:
-            if str(row["NUMERO"]).strip() == str(phone_number).strip():
-                return row["LOCAL"]
+       phone_clean = str(phone_number).strip().lstrip("+")
+print(f"NUMERO RECIBIDO: '{phone_clean}'")
+print(f"NUMEROS EN CONFIG: {[str(row['NUMERO']).strip().lstrip('+') for row in data]}")
+for row in data:
+    config_num = str(row["NUMERO"]).strip().lstrip("+")
+    if config_num == phone_clean:
+        return row["LOCAL"]
         return None
     except Exception as e:
         print(f"Error obteniendo local: {e}")
