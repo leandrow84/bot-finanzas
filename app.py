@@ -33,13 +33,13 @@ def get_local_from_number(phone_number):
         ss = get_spreadsheet()
         config = ss.worksheet("CONFIG")
         data = config.get_all_records()
-       phone_clean = str(phone_number).strip().lstrip("+")
-print(f"NUMERO RECIBIDO: '{phone_clean}'")
-print(f"NUMEROS EN CONFIG: {[str(row['NUMERO']).strip().lstrip('+') for row in data]}")
-for row in data:
-    config_num = str(row["NUMERO"]).strip().lstrip("+")
-    if config_num == phone_clean:
-        return row["LOCAL"]
+        phone_clean = str(phone_number).strip().lstrip("+")
+        print(f"NUMERO RECIBIDO: '{phone_clean}'")
+        print(f"NUMEROS EN CONFIG: {[str(row['NUMERO']).strip().lstrip('+') for row in data]}")
+        for row in data:
+            config_num = str(row["NUMERO"]).strip().lstrip("+")
+            if config_num == phone_clean:
+                return row["LOCAL"]
         return None
     except Exception as e:
         print(f"Error obteniendo local: {e}")
@@ -161,7 +161,7 @@ Reglas:
         system=system_prompt,
         messages=[{"role": "user", "content": mensaje}]
     )
-    
+
     raw = response.content[0].text.strip()
     raw = re.sub(r"```json|```", "", raw).strip()
     return json.loads(raw)
@@ -169,12 +169,12 @@ Reglas:
 @app.route("/webhook", methods=["POST"])
 def webhook():
     incoming_msg = request.values.get("Body", "").strip()
-    from_number  = request.values.get("From", "").replace("whatsapp:", "")
-    
+    from_number = request.values.get("From", "").replace("whatsapp:", "")
+
     print(f"MENSAJE RECIBIDO DE: {from_number}")
-    
+
     resp = MessagingResponse()
-    msg  = resp.message()
+    msg = resp.message()
 
     local = get_local_from_number(from_number)
     if not local:
@@ -192,15 +192,15 @@ def webhook():
     if tipo == "ingreso":
         registrar_fecha_cashflow(local, datos["fecha"])
         resultado = cargar_ingreso(local, datos["fecha"], datos["descripcion"],
-                                   datos["monto"], datos.get("categoria","General"),
-                                   datos.get("responsable",""), datos.get("observaciones",""),
-                                   datos.get("comprobante",""))
+                                   datos["monto"], datos.get("categoria", "General"),
+                                   datos.get("responsable", ""), datos.get("observaciones", ""),
+                                   datos.get("comprobante", ""))
     elif tipo == "gasto":
         registrar_fecha_cashflow(local, datos["fecha"])
         resultado = cargar_gasto(local, datos["fecha"], datos["descripcion"],
-                                 datos["monto"], datos.get("categoria","General"),
-                                 datos.get("proveedor",""), datos.get("observaciones",""),
-                                 datos.get("comprobante",""))
+                                 datos["monto"], datos.get("categoria", "General"),
+                                 datos.get("proveedor", ""), datos.get("observaciones", ""),
+                                 datos.get("comprobante", ""))
     elif tipo == "factura":
         resultado = cargar_factura(local, datos["nro_factura"], datos["proveedor"],
                                    datos["fecha_emision"], datos["fecha_vencimiento"],
@@ -209,15 +209,15 @@ def webhook():
         registrar_fecha_cashflow(local, datos["fecha"])
         resultado = cargar_pago(local, datos["fecha"], datos["nro_factura"],
                                 datos["proveedor"], datos["monto"],
-                                datos.get("forma_pago","Efectivo"),
-                                datos.get("banco",""), datos.get("observaciones",""))
+                                datos.get("forma_pago", "Efectivo"),
+                                datos.get("banco", ""), datos.get("observaciones", ""))
     elif tipo == "consulta":
         resultado = (f"🤖 Hola! Puedo registrar:\n\n"
-                    f"💰 *Ingresos:* 'ingreso 15000 venta mostrador'\n"
-                    f"📤 *Gastos:* 'gasto 3500 luz'\n"
-                    f"🧾 *Facturas:* 'factura 001 Coca-Cola vence 30/04 8000'\n"
-                    f"✅ *Pagos:* 'pague factura 001 5000 transferencia'\n\n"
-                    f"📍 Estás operando: *{local}*")
+                     f"💰 *Ingresos:* 'ingreso 15000 venta mostrador'\n"
+                     f"📤 *Gastos:* 'gasto 3500 luz'\n"
+                     f"🧾 *Facturas:* 'factura 001 Coca-Cola vence 30/04 8000'\n"
+                     f"✅ *Pagos:* 'pague factura 001 5000 transferencia'\n\n"
+                     f"📍 Estás operando: *{local}*")
     else:
         resultado = "❌ No reconocí el tipo de operación. Escribí 'ayuda' para ver los comandos."
 
