@@ -12,7 +12,6 @@ import re
 app = Flask(__name__)
 anthropic_client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-# ── Configuración Google Sheets ───────────────────────────────────────────
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -29,12 +28,13 @@ def get_spreadsheet():
     client = get_sheets_client()
     return client.open_by_key(os.environ.get("SPREADSHEET_ID"))
 
-# ── Identificar local por número ──────────────────────────────────────────
 def get_local_from_number(phone_number):
     try:
         ss = get_spreadsheet()
         config = ss.worksheet("CONFIG")
         data = config.get_all_records()
+        print(f"NUMERO RECIBIDO: '{phone_number}'")
+        print(f"NUMEROS EN CONFIG: {[str(row['NUMERO']).strip() for row in data]}")
         for row in data:
             if str(row["NUMERO"]).strip() == str(phone_number).strip():
                 return row["LOCAL"]
@@ -43,7 +43,6 @@ def get_local_from_number(phone_number):
         print(f"Error obteniendo local: {e}")
         return None
 
-# ── Encontrar próxima fila vacía en un rango ──────────────────────────────
 def next_empty_row(worksheet, col, start_row, end_row):
     values = worksheet.col_values(col)
     for i in range(start_row - 1, end_row):
@@ -51,7 +50,6 @@ def next_empty_row(worksheet, col, start_row, end_row):
             return i + 1
     return None
 
-# ── Cargar INGRESO ────────────────────────────────────────────────────────
 def cargar_ingreso(local, fecha, descripcion, monto, categoria="General", responsable="", observaciones="", comprobante=""):
     try:
         ss = get_spreadsheet()
@@ -64,7 +62,6 @@ def cargar_ingreso(local, fecha, descripcion, monto, categoria="General", respon
     except Exception as e:
         return f"❌ Error al cargar ingreso: {e}"
 
-# ── Cargar GASTO ──────────────────────────────────────────────────────────
 def cargar_gasto(local, fecha, descripcion, monto, categoria="General", proveedor="", observaciones="", comprobante=""):
     try:
         ss = get_spreadsheet()
@@ -77,7 +74,6 @@ def cargar_gasto(local, fecha, descripcion, monto, categoria="General", proveedo
     except Exception as e:
         return f"❌ Error al cargar gasto: {e}"
 
-# ── Cargar FACTURA ────────────────────────────────────────────────────────
 def cargar_factura(local, nro_factura, proveedor, fecha_emision, fecha_vencimiento, monto_total):
     try:
         ss = get_spreadsheet()
@@ -90,7 +86,6 @@ def cargar_factura(local, nro_factura, proveedor, fecha_emision, fecha_vencimien
     except Exception as e:
         return f"❌ Error al cargar factura: {e}"
 
-# ── Cargar PAGO de factura ────────────────────────────────────────────────
 def cargar_pago(local, fecha, nro_factura, proveedor, monto, forma_pago="Efectivo", banco="", observaciones=""):
     try:
         ss = get_spreadsheet()
@@ -111,7 +106,6 @@ def cargar_pago(local, fecha, nro_factura, proveedor, monto, forma_pago="Efectiv
     except Exception as e:
         return f"❌ Error al cargar pago: {e}"
 
-# ── Cargar CASHFLOW diario ────────────────────────────────────────────────
 def registrar_fecha_cashflow(local, fecha):
     try:
         ss = get_spreadsheet()
@@ -128,7 +122,6 @@ def registrar_fecha_cashflow(local, fecha):
         print(f"Error registrando fecha cashflow: {e}")
         return None
 
-# ── Interpretar mensaje con IA ────────────────────────────────────────────
 def interpretar_mensaje(mensaje, local):
     hoy = datetime.now().strftime("%d/%m/%Y")
     system_prompt = f"""Sos un asistente que interpreta mensajes en español para cargar datos financieros.
@@ -171,11 +164,12 @@ Reglas:
     raw = re.sub(r"```json|```", "", raw).strip()
     return json.loads(raw)
 
-# ── Webhook principal ─────────────────────────────────────────────────────
 @app.route("/webhook", methods=["POST"])
 def webhook():
     incoming_msg = request.values.get("Body", "").strip()
     from_number  = request.values.get("From", "").replace("whatsapp:", "")
+    
+    print(f"MENSAJE RECIBIDO DE: {from_number}")
     
     resp = MessagingResponse()
     msg  = resp.message()
@@ -233,5 +227,5 @@ def home():
     return "✅ Bot Finanzas activo!", 200
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
