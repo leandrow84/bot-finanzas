@@ -18,7 +18,10 @@ SCOPES = [
 ]
 
 def get_sheets_client():
-    creds_data = json.loads(os.environ.get("GOOGLE_CREDENTIALS_JSON"))
+    raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    print(f"CREDENCIAL TIPO: {type(raw)}")
+    print(f"CREDENCIAL INICIO: {str(raw)[:50] if raw else 'VACIA'}")
+    creds_data = json.loads(raw)
     creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
