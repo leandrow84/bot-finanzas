@@ -18,7 +18,7 @@ SCOPES = [
 ]
 
 def get_sheets_client():
-    raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    raw = os.environ.get("GCREDS")
     print(f"CREDENCIAL TIPO: {type(raw)}")
     print(f"CREDENCIAL INICIO: {str(raw)[:50] if raw else 'VACIA'}")
     creds_data = json.loads(raw)
