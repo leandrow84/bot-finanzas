@@ -53,7 +53,6 @@ def next_empty_row(worksheet, col, start_row, end_row):
             return i + 1
     return None
 
-# ── INGRESOS: filas 5 a 34 ────────────────────────────────────────────────
 def cargar_ingreso(local, fecha, descripcion, monto, categoria="General", responsable="", observaciones="", comprobante=""):
     try:
         ss = get_spreadsheet()
@@ -66,7 +65,6 @@ def cargar_ingreso(local, fecha, descripcion, monto, categoria="General", respon
     except Exception as e:
         return f"❌ Error ingreso '{descripcion}': {e}"
 
-# ── POSNET: filas 39 a 68 ─────────────────────────────────────────────────
 def cargar_posnet(local, fecha, debito, credito, cuotas, total, observaciones=""):
     try:
         ss = get_spreadsheet()
@@ -75,11 +73,10 @@ def cargar_posnet(local, fecha, debito, credito, cuotas, total, observaciones=""
         if not row:
             return "❌ No hay más espacio en Posnet."
         ws.update(values=[[fecha, "Cierre Posnet", float(debito), float(credito), float(cuotas), float(total), observaciones]], range_name=f"A{row}:G{row}")
-        return f"✅ Posnet cargado — Total: ${float(total):,.2f}\n💳 Débito: ${float(debito):,.2f} | Crédito: ${float(credito):,.2f} | Cuotas: ${float(cuotas):,.2f}"
+        return f"✅ Posnet cargado — Total: ${float(total):,.2f}\n💳 Debito: ${float(debito):,.2f} | Credito: ${float(credito):,.2f} | Cuotas: ${float(cuotas):,.2f}"
     except Exception as e:
         return f"❌ Error Posnet: {e}"
 
-# ── GASTOS: filas 73 a 102 ────────────────────────────────────────────────
 def cargar_gasto(local, fecha, descripcion, monto, categoria="General", proveedor="", observaciones="", comprobante=""):
     try:
         ss = get_spreadsheet()
@@ -92,7 +89,6 @@ def cargar_gasto(local, fecha, descripcion, monto, categoria="General", proveedo
     except Exception as e:
         return f"❌ Error gasto '{descripcion}': {e}"
 
-# ── FACTURAS: filas 107 a 126 ─────────────────────────────────────────────
 def cargar_factura(local, nro_factura, proveedor, fecha_emision, fecha_vencimiento, monto_total):
     try:
         ss = get_spreadsheet()
@@ -101,11 +97,10 @@ def cargar_factura(local, nro_factura, proveedor, fecha_emision, fecha_vencimien
         if not row:
             return "❌ No hay más espacio en facturas."
         ws.update(values=[[nro_factura, proveedor, fecha_emision, fecha_vencimiento, float(monto_total), 0]], range_name=f"A{row}:F{row}")
-        return f"✅ Factura: {proveedor} Nº{nro_factura} — ${float(monto_total):,.2f}"
+        return f"✅ Factura: {proveedor} N{nro_factura} — ${float(monto_total):,.2f}"
     except Exception as e:
         return f"❌ Error factura '{proveedor}': {e}"
 
-# ── PAGOS: filas 131 a 150 ────────────────────────────────────────────────
 def cargar_pago(local, fecha, nro_factura, proveedor, monto, forma_pago="Efectivo", banco="", observaciones=""):
     try:
         ss = get_spreadsheet()
@@ -121,11 +116,10 @@ def cargar_pago(local, fecha, nro_factura, proveedor, monto, forma_pago="Efectiv
                 pagado_actual = float(fila[5]) if fila[5] else 0
                 ws.update_cell(fact_row, 6, pagado_actual + float(monto))
                 break
-        return f"✅ Pago: {proveedor} Nº{nro_factura} — ${float(monto):,.2f} ({forma_pago})"
+        return f"✅ Pago: {proveedor} N{nro_factura} — ${float(monto):,.2f} ({forma_pago})"
     except Exception as e:
         return f"❌ Error pago '{proveedor}': {e}"
 
-# ── CASHFLOW: filas 155 a 185 ─────────────────────────────────────────────
 def registrar_fecha_cashflow(local, fecha):
     try:
         ss = get_spreadsheet()
@@ -144,9 +138,13 @@ def registrar_fecha_cashflow(local, fecha):
 def descargar_imagen(media_url):
     twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID")
     twilio_token = os.environ.get("TWILIO_AUTH_TOKEN")
+    print(f"SID: {twilio_sid[:10] if twilio_sid else 'VACIO'}")
+    print(f"TOKEN: {twilio_token[:5] if twilio_token else 'VACIO'}")
     response = http_requests.get(media_url, auth=(twilio_sid, twilio_token))
+    print(f"STATUS DESCARGA: {response.status_code}")
     if response.status_code == 200:
         return base64.standard_b64encode(response.content).decode("utf-8"), response.headers.get("Content-Type", "image/jpeg")
+    print(f"ERROR DESCARGA: {response.text[:200]}")
     return None, None
 
 def analizar_imagen(image_b64, media_type, local):
@@ -219,13 +217,13 @@ CONSULTA:
 
 Reglas:
 - Siempre devolvé un array aunque sea con un solo elemento
-- Si dice "hoy" usá {hoy}
-- Si dice "ayer" calculá la fecha de ayer
-- Si no menciona fecha, usá {hoy}
+- Si dice "hoy" usa {hoy}
+- Si dice "ayer" calcula la fecha de ayer
+- Si no menciona fecha, usa {hoy}
 - Si no menciona categoria, inferila del contexto
-- Montos siempre como número sin simbolos ni puntos de miles
+- Montos siempre como numero sin simbolos ni puntos de miles
 - Fechas siempre en formato DD/MM/YYYY
-- Respondé SOLO el array JSON"""
+- Responde SOLO el array JSON"""
 
     response = anthropic_client.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -274,12 +272,12 @@ def procesar_operacion(datos, local):
                 f"📤 *Gastos:* 'gasto 3500 luz'\n"
                 f"🧾 *Facturas:* 'factura 001 Coca-Cola vence 30/04 8000'\n"
                 f"✅ *Pagos:* 'pague factura 001 5000 transferencia'\n"
-                f"📸 *Foto:* mandá foto de remito o cierre Posnet\n\n"
-                f"📌 Podés cargar varios en un mensaje:\n"
+                f"📸 *Foto:* manda foto de remito o cierre Posnet\n\n"
+                f"📌 Podes cargar varios en un mensaje:\n"
                 f"'Gastos: Remis 20000, Moto 45000'\n\n"
-                f"📍 Estás operando: *{local}*")
+                f"📍 Estas operando: *{local}*")
     else:
-        return "❌ No reconocí la operación."
+        return "❌ No reconoci la operacion."
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -294,7 +292,7 @@ def webhook():
 
     local = get_local_from_number(from_number)
     if not local:
-        msg.body(f"⛔ Número no autorizado: {from_number}")
+        msg.body(f"⛔ Numero no autorizado: {from_number}")
         return str(resp)
 
     if num_media > 0:
@@ -304,7 +302,7 @@ def webhook():
 
         image_b64, detected_type = descargar_imagen(media_url)
         if not image_b64:
-            msg.body("❌ No pude descargar la imagen. Intentá de nuevo.")
+            msg.body("❌ No pude descargar la imagen. Intenta de nuevo.")
             return str(resp)
 
         try:
@@ -329,7 +327,7 @@ def webhook():
             resultados.append(resultado)
 
         total_ops = len(resultados)
-        resumen = f"📋 *{local}* — {total_ops} operación{'es' if total_ops > 1 else ''} registrada{'s' if total_ops > 1 else ''}:\n\n"
+        resumen = f"📋 *{local}* — {total_ops} operacion{'es' if total_ops > 1 else ''} registrada{'s' if total_ops > 1 else ''}:\n\n"
         resumen += "\n".join(resultados)
         msg.body(resumen)
 
