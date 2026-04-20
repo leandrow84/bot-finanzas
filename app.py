@@ -19,8 +19,6 @@ SCOPES = [
 
 def get_sheets_client():
     raw = os.environ.get("GCREDS")
-    print(f"CREDENCIAL TIPO: {type(raw)}")
-    print(f"CREDENCIAL INICIO: {str(raw)[:50] if raw else 'VACIA'}")
     creds_data = json.loads(raw)
     creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
     if creds.expired and creds.refresh_token:
@@ -37,8 +35,6 @@ def get_local_from_number(phone_number):
         config = ss.worksheet("CONFIG")
         data = config.get_all_records()
         phone_clean = str(phone_number).strip().lstrip("+")
-        print(f"NUMERO RECIBIDO: '{phone_clean}'")
-        print(f"NUMEROS EN CONFIG: {[str(row['NUMERO']).strip().lstrip('+') for row in data]}")
         for row in data:
             config_num = str(row["NUMERO"]).strip().lstrip("+")
             if config_num == phone_clean:
@@ -63,9 +59,9 @@ def cargar_ingreso(local, fecha, descripcion, monto, categoria="General", respon
         if not row:
             return "❌ No hay más espacio en ingresos. Ampliá la planilla."
         ws.update(f"A{row}:G{row}", [[fecha, descripcion, categoria, float(monto), responsable, observaciones, comprobante]])
-        return f"✅ Ingreso cargado en {local}\n📅 {fecha}\n💰 ${float(monto):,.2f}\n📝 {descripcion}"
+        return f"✅ Ingreso: {descripcion} — ${float(monto):,.2f}"
     except Exception as e:
-        return f"❌ Error al cargar ingreso: {e}"
+        return f"❌ Error ingreso '{descripcion}': {e}"
 
 def cargar_gasto(local, fecha, descripcion, monto, categoria="General", proveedor="", observaciones="", comprobante=""):
     try:
@@ -75,9 +71,9 @@ def cargar_gasto(local, fecha, descripcion, monto, categoria="General", proveedo
         if not row:
             return "❌ No hay más espacio en gastos. Ampliá la planilla."
         ws.update(f"A{row}:G{row}", [[fecha, descripcion, categoria, float(monto), proveedor, observaciones, comprobante]])
-        return f"✅ Gasto cargado en {local}\n📅 {fecha}\n💸 ${float(monto):,.2f}\n📝 {descripcion}"
+        return f"✅ Gasto: {descripcion} — ${float(monto):,.2f}"
     except Exception as e:
-        return f"❌ Error al cargar gasto: {e}"
+        return f"❌ Error gasto '{descripcion}': {e}"
 
 def cargar_factura(local, nro_factura, proveedor, fecha_emision, fecha_vencimiento, monto_total):
     try:
@@ -87,9 +83,9 @@ def cargar_factura(local, nro_factura, proveedor, fecha_emision, fecha_vencimien
         if not row:
             return "❌ No hay más espacio en facturas. Ampliá la planilla."
         ws.update(f"A{row}:F{row}", [[nro_factura, proveedor, fecha_emision, fecha_vencimiento, float(monto_total), 0]])
-        return f"✅ Factura cargada en {local}\n🧾 Nº {nro_factura}\n🏢 {proveedor}\n💰 ${float(monto_total):,.2f}\n📅 Vence: {fecha_vencimiento}"
+        return f"✅ Factura: {proveedor} Nº{nro_factura} — ${float(monto_total):,.2f}"
     except Exception as e:
-        return f"❌ Error al cargar factura: {e}"
+        return f"❌ Error factura '{proveedor}': {e}"
 
 def cargar_pago(local, fecha, nro_factura, proveedor, monto, forma_pago="Efectivo", banco="", observaciones=""):
     try:
@@ -104,20 +100,18 @@ def cargar_pago(local, fecha, nro_factura, proveedor, monto, forma_pago="Efectiv
             if fila and str(fila[0]).strip() == str(nro_factura).strip():
                 fact_row = 73 + i
                 pagado_actual = float(fila[5]) if fila[5] else 0
-                nuevo_pagado = pagado_actual + float(monto)
-                ws.update_cell(fact_row, 6, nuevo_pagado)
+                ws.update_cell(fact_row, 6, pagado_actual + float(monto))
                 break
-        return f"✅ Pago registrado en {local}\n📅 {fecha}\n🧾 Factura Nº {nro_factura}\n💳 ${float(monto):,.2f} - {forma_pago}"
+        return f"✅ Pago: {proveedor} Nº{nro_factura} — ${float(monto):,.2f} ({forma_pago})"
     except Exception as e:
-        return f"❌ Error al cargar pago: {e}"
+        return f"❌ Error pago '{proveedor}': {e}"
 
 def registrar_fecha_cashflow(local, fecha):
     try:
         ss = get_spreadsheet()
         ws = ss.worksheet(local)
         fechas = ws.col_values(1)[123:154]
-        fecha_existe = any(f.strip() == fecha.strip() for f in fechas if f)
-        if fecha_existe:
+        if any(f.strip() == fecha.strip() for f in fechas if f):
             return None
         row = next_empty_row(ws, 1, 124, 154)
         if row:
@@ -132,7 +126,15 @@ def interpretar_mensaje(mensaje, local):
     system_prompt = f"""Sos un asistente que interpreta mensajes en español para cargar datos financieros.
 Hoy es {hoy}. El local es: {local}.
 
-Analizá el mensaje y respondé ÚNICAMENTE con un JSON válido con esta estructura según el tipo:
+El mensaje puede contener UNA o MÚLTIPLES operaciones. Analizá todo el mensaje y devolvé SIEMPRE una lista JSON con todas las operaciones encontradas.
+
+Respondé ÚNICAMENTE con un array JSON válido, por ejemplo:
+[
+  {{"tipo": "gasto", "fecha": "DD/MM/YYYY", "descripcion": "Remis", "monto": 20000, "categoria": "Transporte", "proveedor": "", "observaciones": "", "comprobante": ""}},
+  {{"tipo": "gasto", "fecha": "DD/MM/YYYY", "descripcion": "Moto", "monto": 45000, "categoria": "Transporte", "proveedor": "", "observaciones": "", "comprobante": ""}}
+]
+
+Estructuras disponibles:
 
 INGRESO:
 {{"tipo": "ingreso", "fecha": "DD/MM/YYYY", "descripcion": "...", "monto": 0000, "categoria": "...", "responsable": "", "observaciones": "", "comprobante": ""}}
@@ -146,21 +148,22 @@ FACTURA:
 PAGO:
 {{"tipo": "pago", "fecha": "DD/MM/YYYY", "nro_factura": "...", "proveedor": "...", "monto": 0000, "forma_pago": "Efectivo", "banco": "", "observaciones": ""}}
 
-CONSULTA (si no es ninguno de los anteriores):
+CONSULTA:
 {{"tipo": "consulta", "mensaje": "..."}}
 
 Reglas:
+- Siempre devolvé un array, aunque sea con un solo elemento
 - Si dice "hoy" usá {hoy}
 - Si dice "ayer" calculá la fecha de ayer
-- Si no menciona categoría, poné "General"
-- Si no menciona forma de pago, poné "Efectivo"
+- Si no menciona fecha, usá {hoy}
+- Si no menciona categoría, inferila del contexto (Transporte, Servicios, Insumos, etc.)
 - Montos siempre como número sin símbolos ni puntos de miles
 - Fechas siempre en formato DD/MM/YYYY
-- Respondé SOLO el JSON, sin explicaciones ni texto adicional"""
+- Respondé SOLO el array JSON, sin explicaciones ni texto adicional"""
 
     response = anthropic_client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=500,
+        max_tokens=1000,
         system=system_prompt,
         messages=[{"role": "user", "content": mensaje}]
     )
@@ -168,6 +171,42 @@ Reglas:
     raw = response.content[0].text.strip()
     raw = re.sub(r"```json|```", "", raw).strip()
     return json.loads(raw)
+
+def procesar_operacion(datos, local):
+    tipo = datos.get("tipo")
+    if tipo == "ingreso":
+        registrar_fecha_cashflow(local, datos["fecha"])
+        return cargar_ingreso(local, datos["fecha"], datos["descripcion"],
+                              datos["monto"], datos.get("categoria", "General"),
+                              datos.get("responsable", ""), datos.get("observaciones", ""),
+                              datos.get("comprobante", ""))
+    elif tipo == "gasto":
+        registrar_fecha_cashflow(local, datos["fecha"])
+        return cargar_gasto(local, datos["fecha"], datos["descripcion"],
+                            datos["monto"], datos.get("categoria", "General"),
+                            datos.get("proveedor", ""), datos.get("observaciones", ""),
+                            datos.get("comprobante", ""))
+    elif tipo == "factura":
+        return cargar_factura(local, datos["nro_factura"], datos["proveedor"],
+                              datos["fecha_emision"], datos["fecha_vencimiento"],
+                              datos["monto_total"])
+    elif tipo == "pago":
+        registrar_fecha_cashflow(local, datos["fecha"])
+        return cargar_pago(local, datos["fecha"], datos["nro_factura"],
+                           datos["proveedor"], datos["monto"],
+                           datos.get("forma_pago", "Efectivo"),
+                           datos.get("banco", ""), datos.get("observaciones", ""))
+    elif tipo == "consulta":
+        return (f"🤖 Hola! Puedo registrar:\n\n"
+                f"💰 *Ingresos:* 'ingreso 15000 venta mostrador'\n"
+                f"📤 *Gastos:* 'gasto 3500 luz'\n"
+                f"🧾 *Facturas:* 'factura 001 Coca-Cola vence 30/04 8000'\n"
+                f"✅ *Pagos:* 'pague factura 001 5000 transferencia'\n\n"
+                f"📌 También podés cargar varios en un mensaje:\n"
+                f"'Gastos: Remis 20000, Moto 45000, Papelera 25000'\n\n"
+                f"📍 Estás operando: *{local}*")
+    else:
+        return "❌ No reconocí la operación."
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -185,46 +224,22 @@ def webhook():
         return str(resp)
 
     try:
-        datos = interpretar_mensaje(incoming_msg, local)
+        lista_operaciones = interpretar_mensaje(incoming_msg, local)
     except Exception as e:
         msg.body(f"❌ No pude entender el mensaje. Intentá de nuevo.\nError: {e}")
         return str(resp)
 
-    tipo = datos.get("tipo")
+    resultados = []
+    for operacion in lista_operaciones:
+        resultado = procesar_operacion(operacion, local)
+        resultados.append(resultado)
 
-    if tipo == "ingreso":
-        registrar_fecha_cashflow(local, datos["fecha"])
-        resultado = cargar_ingreso(local, datos["fecha"], datos["descripcion"],
-                                   datos["monto"], datos.get("categoria", "General"),
-                                   datos.get("responsable", ""), datos.get("observaciones", ""),
-                                   datos.get("comprobante", ""))
-    elif tipo == "gasto":
-        registrar_fecha_cashflow(local, datos["fecha"])
-        resultado = cargar_gasto(local, datos["fecha"], datos["descripcion"],
-                                 datos["monto"], datos.get("categoria", "General"),
-                                 datos.get("proveedor", ""), datos.get("observaciones", ""),
-                                 datos.get("comprobante", ""))
-    elif tipo == "factura":
-        resultado = cargar_factura(local, datos["nro_factura"], datos["proveedor"],
-                                   datos["fecha_emision"], datos["fecha_vencimiento"],
-                                   datos["monto_total"])
-    elif tipo == "pago":
-        registrar_fecha_cashflow(local, datos["fecha"])
-        resultado = cargar_pago(local, datos["fecha"], datos["nro_factura"],
-                                datos["proveedor"], datos["monto"],
-                                datos.get("forma_pago", "Efectivo"),
-                                datos.get("banco", ""), datos.get("observaciones", ""))
-    elif tipo == "consulta":
-        resultado = (f"🤖 Hola! Puedo registrar:\n\n"
-                     f"💰 *Ingresos:* 'ingreso 15000 venta mostrador'\n"
-                     f"📤 *Gastos:* 'gasto 3500 luz'\n"
-                     f"🧾 *Facturas:* 'factura 001 Coca-Cola vence 30/04 8000'\n"
-                     f"✅ *Pagos:* 'pague factura 001 5000 transferencia'\n\n"
-                     f"📍 Estás operando: *{local}*")
-    else:
-        resultado = "❌ No reconocí el tipo de operación. Escribí 'ayuda' para ver los comandos."
+    # Resumen final
+    total_ops = len(resultados)
+    resumen = f"📋 *{local}* — {total_ops} operación{'es' if total_ops > 1 else ''} registrada{'s' if total_ops > 1 else ''}:\n\n"
+    resumen += "\n".join(resultados)
 
-    msg.body(resultado)
+    msg.body(resumen)
     return str(resp)
 
 @app.route("/", methods=["GET"])
