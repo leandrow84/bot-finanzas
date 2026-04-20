@@ -2,8 +2,10 @@ import os
 import json
 import base64
 import re
+import threading
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
+from twilio.rest import Client as TwilioClient
 import gspread
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -59,7 +61,7 @@ def cargar_ingreso(local, fecha, descripcion, monto, categoria="General", respon
         ws = ss.worksheet(local)
         row = next_empty_row(ws, 1, 5, 34)
         if not row:
-            return "❌ No hay más espacio en ingresos."
+            return "❌ No hay mas espacio en ingresos."
         ws.update(values=[[fecha, descripcion, categoria, float(monto), responsable, observaciones, comprobante]], range_name=f"A{row}:G{row}")
         return f"✅ Ingreso: {descripcion} — ${float(monto):,.2f}"
     except Exception as e:
@@ -71,7 +73,7 @@ def cargar_posnet(local, fecha, debito, credito, cuotas, total, observaciones=""
         ws = ss.worksheet(local)
         row = next_empty_row(ws, 1, 39, 68)
         if not row:
-            return "❌ No hay más espacio en Posnet."
+            return "❌ No hay mas espacio en Posnet."
         ws.update(values=[[fecha, "Cierre Posnet", float(debito), float(credito), float(cuotas), float(total), observaciones]], range_name=f"A{row}:G{row}")
         return f"✅ Posnet cargado — Total: ${float(total):,.2f}\n💳 Debito: ${float(debito):,.2f} | Credito: ${float(credito):,.2f} | Cuotas: ${float(cuotas):,.2f}"
     except Exception as e:
@@ -83,7 +85,7 @@ def cargar_gasto(local, fecha, descripcion, monto, categoria="General", proveedo
         ws = ss.worksheet(local)
         row = next_empty_row(ws, 1, 73, 102)
         if not row:
-            return "❌ No hay más espacio en gastos."
+            return "❌ No hay mas espacio en gastos."
         ws.update(values=[[fecha, descripcion, categoria, float(monto), proveedor, observaciones, comprobante]], range_name=f"A{row}:G{row}")
         return f"✅ Gasto: {descripcion} — ${float(monto):,.2f}"
     except Exception as e:
@@ -95,7 +97,7 @@ def cargar_factura(local, nro_factura, proveedor, fecha_emision, fecha_vencimien
         ws = ss.worksheet(local)
         row = next_empty_row(ws, 1, 107, 126)
         if not row:
-            return "❌ No hay más espacio en facturas."
+            return "❌ No hay mas espacio en facturas."
         ws.update(values=[[nro_factura, proveedor, fecha_emision, fecha_vencimiento, float(monto_total), 0]], range_name=f"A{row}:F{row}")
         return f"✅ Factura: {proveedor} N{nro_factura} — ${float(monto_total):,.2f}"
     except Exception as e:
@@ -107,7 +109,7 @@ def cargar_pago(local, fecha, nro_factura, proveedor, monto, forma_pago="Efectiv
         ws = ss.worksheet(local)
         row = next_empty_row(ws, 1, 131, 150)
         if not row:
-            return "❌ No hay más espacio en pagos."
+            return "❌ No hay mas espacio en pagos."
         ws.update(values=[[fecha, nro_factura, proveedor, float(monto), forma_pago, banco, observaciones]], range_name=f"A{row}:G{row}")
         facturas = ws.get("A107:F126")
         for i, fila in enumerate(facturas):
@@ -134,6 +136,21 @@ def registrar_fecha_cashflow(local, fecha):
     except Exception as e:
         print(f"Error registrando fecha cashflow: {e}")
         return None
+
+def enviar_whatsapp(to_number, mensaje):
+    try:
+        twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+        twilio_token = os.environ.get("TWILIO_AUTH_TOKEN")
+        sandbox_number = os.environ.get("TWILIO_SANDBOX_NUMBER", "+14155238886")
+        client = TwilioClient(twilio_sid, twilio_token)
+        client.messages.create(
+            from_=f"whatsapp:{sandbox_number}",
+            to=f"whatsapp:+{to_number}",
+            body=mensaje
+        )
+        print(f"Mensaje enviado a {to_number}")
+    except Exception as e:
+        print(f"Error enviando mensaje: {e}")
 
 def descargar_imagen(media_url):
     twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID")
@@ -300,18 +317,22 @@ def webhook():
         media_type = request.values.get("MediaContentType0", "image/jpeg")
         print(f"Imagen recibida: {media_url}")
 
-        image_b64, detected_type = descargar_imagen(media_url)
-        if not image_b64:
-            msg.body("❌ No pude descargar la imagen. Intenta de nuevo.")
-            return str(resp)
+        msg.body("📸 Imagen recibida, procesando... Un momento.")
 
-        try:
-            datos = analizar_imagen(image_b64, detected_type or media_type, local)
-            resultado = procesar_operacion(datos, local)
-            resumen = f"📸 *{local}* — Imagen procesada:\n\n{resultado}"
-            msg.body(resumen)
-        except Exception as e:
-            msg.body(f"❌ No pude interpretar la imagen.\nError: {e}")
+        def procesar_en_background():
+            try:
+                image_b64, detected_type = descargar_imagen(media_url)
+                if not image_b64:
+                    enviar_whatsapp(from_number, "❌ No pude descargar la imagen. Intenta de nuevo.")
+                    return
+                datos = analizar_imagen(image_b64, detected_type or media_type, local)
+                resultado = procesar_operacion(datos, local)
+                resumen = f"📸 *{local}* — Imagen procesada:\n\n{resultado}"
+                enviar_whatsapp(from_number, resumen)
+            except Exception as e:
+                enviar_whatsapp(from_number, f"❌ No pude interpretar la imagen.\nError: {e}")
+
+        threading.Thread(target=procesar_en_background).start()
         return str(resp)
 
     if incoming_msg:
