@@ -3,6 +3,7 @@ import json
 import base64
 import re
 import threading
+from datetime import datetime
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client as TwilioClient
@@ -10,7 +11,6 @@ import gspread
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from anthropic import Anthropic
-from datetime import datetime
 import requests as http_requests
 
 app = Flask(__name__)
@@ -20,6 +20,13 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
+
+# Estado de sesión en memoria
+# {numero: {"responsable": "nombre", "pendiente": {...}, "timestamp": datetime}}
+sesiones = {}
+
+DIAS_ES = {0: "Lunes", 1: "Martes", 2: "Miercoles", 3: "Jueves",
+           4: "Viernes", 5: "Sabado", 6: "Domingo"}
 
 def get_sheets_client():
     raw = os.environ.get("GCREDS")
@@ -46,6 +53,31 @@ def get_local_from_number(phone_number):
         return None
     except Exception as e:
         print(f"Error obteniendo local: {e}")
+        return None
+
+def get_responsable_turno(local):
+    if local == "FABRICA":
+        return None  # Fabrica siempre pregunta
+    try:
+        ss = get_spreadsheet()
+        ws = ss.worksheet("TURNOS")
+        data = ws.get_all_records()
+        ahora = datetime.now()
+        dia_actual = DIAS_ES[ahora.weekday()]
+        hora_actual = ahora.hour + ahora.minute / 60
+
+        for row in data:
+            if str(row["LOCAL"]).strip().upper() != local.upper():
+                continue
+            if str(row["DIA"]).strip() != dia_actual:
+                continue
+            hora_inicio = float(str(row["HORA_INICIO"]).replace(":", ".").replace(",", "."))
+            hora_fin = float(str(row["HORA_FIN"]).replace(":", ".").replace(",", "."))
+            if hora_inicio <= hora_actual < hora_fin:
+                return str(row["RESPONSABLE"]).strip()
+        return None
+    except Exception as e:
+        print(f"Error obteniendo turno: {e}")
         return None
 
 def next_empty_row(worksheet, col, start_row, end_row):
@@ -155,8 +187,6 @@ def enviar_whatsapp(to_number, mensaje):
 def descargar_imagen(media_url):
     twilio_sid = os.environ.get("TWILIO_ACCOUNT_SID")
     twilio_token = os.environ.get("TWILIO_AUTH_TOKEN")
-    print(f"SID: {twilio_sid[:10] if twilio_sid else 'VACIO'}")
-    print(f"TOKEN: {twilio_token[:5] if twilio_token else 'VACIO'}")
     response = http_requests.get(media_url, auth=(twilio_sid, twilio_token))
     print(f"STATUS DESCARGA: {response.status_code}")
     if response.status_code == 200:
@@ -253,13 +283,13 @@ Reglas:
     raw = re.sub(r"```json|```", "", raw).strip()
     return json.loads(raw)
 
-def procesar_operacion(datos, local):
+def procesar_operacion(datos, local, responsable=""):
     tipo = datos.get("tipo")
     if tipo == "ingreso":
         registrar_fecha_cashflow(local, datos["fecha"])
         return cargar_ingreso(local, datos["fecha"], datos["descripcion"],
                               datos["monto"], datos.get("categoria", "General"),
-                              datos.get("responsable", ""), datos.get("observaciones", ""),
+                              responsable, datos.get("observaciones", ""),
                               datos.get("comprobante", ""))
     elif tipo == "gasto":
         registrar_fecha_cashflow(local, datos["fecha"])
@@ -312,11 +342,100 @@ def webhook():
         msg.body(f"⛔ Numero no autorizado: {from_number}")
         return str(resp)
 
+    sesion = sesiones.get(from_number, {})
+    ahora = datetime.now()
+
+    # Limpiar sesión si tiene más de 8 horas
+    if sesion.get("timestamp"):
+        diff = (ahora - sesion["timestamp"]).seconds / 3600
+        if diff > 8:
+            sesion = {}
+            sesiones[from_number] = {}
+
+    # Si está esperando confirmación de responsable
+    if sesion.get("esperando_responsable"):
+        respuesta = incoming_msg.strip().upper()
+        responsable_sugerido = sesion.get("responsable_sugerido", "")
+        operaciones_pendientes = sesion.get("pendiente", [])
+
+        if respuesta == "SI":
+            responsable = responsable_sugerido
+        else:
+            responsable = incoming_msg.strip()
+
+        sesiones[from_number] = {
+            "responsable": responsable,
+            "timestamp": ahora,
+            "esperando_responsable": False
+        }
+
+        # Procesar operaciones pendientes
+        if operaciones_pendientes:
+            resultados = []
+            for op in operaciones_pendientes:
+                resultado = procesar_operacion(op, local, responsable)
+                resultados.append(resultado)
+            total_ops = len(resultados)
+            resumen = f"👤 *{responsable}* | 📋 *{local}*\n{total_ops} operacion{'es' if total_ops > 1 else ''} registrada{'s' if total_ops > 1 else ''}:\n\n"
+            resumen += "\n".join(resultados)
+            msg.body(resumen)
+        else:
+            msg.body(f"👤 Hola *{responsable}*! Listo para cargar operaciones en *{local}*.")
+        return str(resp)
+
+    # Determinar responsable
+    responsable_actual = sesion.get("responsable", "")
+
+    if not responsable_actual:
+        responsable_turno = get_responsable_turno(local)
+
+        if local.upper() == "FABRICA":
+            pregunta = f"👤 Hola! ¿Quién está cargando en *{local}*? Escribí tu nombre."
+        elif responsable_turno:
+            pregunta = f"👤 Hola! ¿Sos *{responsable_turno}*?\nRespondé *SI* para confirmar o escribí tu nombre."
+        else:
+            pregunta = f"👤 Hola! ¿Quién está cargando en *{local}*? Escribí tu nombre."
+
+        # Guardar operaciones pendientes si hay mensaje
+        if num_media > 0 or incoming_msg:
+            if num_media > 0:
+                sesiones[from_number] = {
+                    "esperando_responsable": True,
+                    "responsable_sugerido": responsable_turno or "",
+                    "pendiente_media": {
+                        "url": request.values.get("MediaUrl0"),
+                        "type": request.values.get("MediaContentType0", "image/jpeg")
+                    },
+                    "timestamp": ahora
+                }
+            else:
+                try:
+                    lista_ops = interpretar_mensaje(incoming_msg, local)
+                    sesiones[from_number] = {
+                        "esperando_responsable": True,
+                        "responsable_sugerido": responsable_turno or "",
+                        "pendiente": lista_ops,
+                        "timestamp": ahora
+                    }
+                except:
+                    sesiones[from_number] = {
+                        "esperando_responsable": True,
+                        "responsable_sugerido": responsable_turno or "",
+                        "pendiente": [],
+                        "timestamp": ahora
+                    }
+
+        msg.body(pregunta)
+        return str(resp)
+
+    # Ya tiene responsable identificado
+    responsable = responsable_actual
+
+    # Procesar imagen
     if num_media > 0:
         media_url = request.values.get("MediaUrl0")
         media_type = request.values.get("MediaContentType0", "image/jpeg")
         print(f"Imagen recibida: {media_url}")
-
         msg.body("📸 Imagen recibida, procesando... Un momento.")
 
         def procesar_en_background():
@@ -326,8 +445,8 @@ def webhook():
                     enviar_whatsapp(from_number, "❌ No pude descargar la imagen. Intenta de nuevo.")
                     return
                 datos = analizar_imagen(image_b64, detected_type or media_type, local)
-                resultado = procesar_operacion(datos, local)
-                resumen = f"📸 *{local}* — Imagen procesada:\n\n{resultado}"
+                resultado = procesar_operacion(datos, local, responsable)
+                resumen = f"👤 *{responsable}* | 📸 *{local}*\n\n{resultado}"
                 enviar_whatsapp(from_number, resumen)
             except Exception as e:
                 enviar_whatsapp(from_number, f"❌ No pude interpretar la imagen.\nError: {e}")
@@ -335,7 +454,14 @@ def webhook():
         threading.Thread(target=procesar_en_background).start()
         return str(resp)
 
+    # Procesar texto
     if incoming_msg:
+        # Comando para cambiar responsable
+        if incoming_msg.lower() in ["cambiar usuario", "cambiar responsable", "soy otro"]:
+            sesiones[from_number] = {}
+            msg.body("👤 Ok! ¿Quién está cargando ahora? Escribí tu nombre.")
+            return str(resp)
+
         try:
             lista_operaciones = interpretar_mensaje(incoming_msg, local)
         except Exception as e:
@@ -344,12 +470,15 @@ def webhook():
 
         resultados = []
         for operacion in lista_operaciones:
-            resultado = procesar_operacion(operacion, local)
+            resultado = procesar_operacion(operacion, local, responsable)
             resultados.append(resultado)
 
         total_ops = len(resultados)
-        resumen = f"📋 *{local}* — {total_ops} operacion{'es' if total_ops > 1 else ''} registrada{'s' if total_ops > 1 else ''}:\n\n"
+        resumen = f"👤 *{responsable}* | 📋 *{local}*\n{total_ops} operacion{'es' if total_ops > 1 else ''} registrada{'s' if total_ops > 1 else ''}:\n\n"
         resumen += "\n".join(resultados)
+
+        # Actualizar timestamp de sesión
+        sesiones[from_number]["timestamp"] = ahora
         msg.body(resumen)
 
     return str(resp)
